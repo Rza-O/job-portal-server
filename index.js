@@ -1,12 +1,12 @@
 const express = require('express');
 const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 require('dotenv').config();
 const port = process.env.PORT || 3000
 
 app.use(cors());
-app.use(express());
+app.use(express.json());
 
 
 
@@ -28,6 +28,112 @@ async function run() {
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
+
+        // Jobs Related API
+        const jobsCollection = client.db('JobPortal').collection('jobs');
+        const jobApplicationCollection = client.db('JobPortal').collection('Job_Applications');
+
+        app.get('/jobs', async (req, res) => {
+            const email = req.query.email;
+            let query = {};
+            if (email) {
+                query = { hr_email: email }
+            }
+            const cursor = jobsCollection.find(query);
+            const result = await cursor.toArray();
+            res.send(result)
+        })
+
+        app.get('/jobs/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await jobsCollection.findOne(query);
+            res.send(result);
+        })
+
+        app.post('/jobs', async (req, res) => {
+            const newJob = req.body;
+            const result = await jobsCollection.insertOne(newJob);
+            res.send(result);
+        })
+
+        // job application api
+
+        app.get('/applications', async (req, res) => {
+            const email = req.query.email;
+            const query = { applicant_email: email };
+            const result = await jobApplicationCollection.find(query).toArray();
+
+            // fokira way to aggregate data
+            for (const application of result) {
+                console.log(application.job_id);
+                const query1 = { _id: new ObjectId(application.job_id) }
+                const job = await jobsCollection.findOne(query1);
+                if (job) {
+                    application.title = job.title;
+                    application.company = job.company;
+                    application.company_logo = job.company_logo;
+                    application.location = job.location;
+                }
+            }
+
+            res.send(result);
+        })
+
+
+        app.get('/applications/jobs/:job_id', async (req,res) => {
+            const jobId = req.params.job_id;
+            const query = {job_id: jobId};
+            const result = await jobApplicationCollection.find(query).toArray();
+            res.send(result);
+        })
+
+
+
+        app.post('/applications', async (req, res) => {
+            const application = req.body;
+            console.log(application);
+            const result = await jobApplicationCollection.insertOne(application);
+
+            // not the best way to do the aggregation(DON"T DO IT)
+            const id = application.job_id;
+            const query = { _id: new ObjectId(id) }
+            const job = await jobsCollection.findOne(query);
+            console.log(job);
+            let count = 0;
+            if(job.applicationCount){
+                count = job.applicationCount + 1
+            }
+            else{
+                count = 1
+            }
+
+            // now updating the job info
+            const filter = {_id: new ObjectId(id)};
+            const updatedDoc = {
+                $set: {
+                    applicationCount: count
+                }
+            }
+
+            const updatedResult = await jobsCollection.updateOne(filter, updatedDoc);
+
+            res.send(result);
+        })
+
+        app.patch('/applications/:id', async (req,res) => {
+            const id = req.params.id;
+            const data = req.body;
+            const filter = {_id: new ObjectId(id)};
+            const updatedDoc = {
+                $set: {
+                    status: data.status
+                }
+            }
+            const result =await jobApplicationCollection.updateOne(filter, updatedDoc);
+            res.send(result)
+        })
+
     } finally {
         // Ensures that the client will close when you finish/error
         // await client.close();
@@ -36,7 +142,7 @@ async function run() {
 run().catch(console.dir);
 
 
-app.get('/', (req,res) => {
+app.get('/', (req, res) => {
     res.send('job is falling from the sky')
 })
 
